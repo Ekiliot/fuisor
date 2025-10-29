@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build files
+fuisor_app/build/
+fuisor_app/.dart_tool/
+fuisor_app/.flutter-plugins
+fuisor_app/.flutter-plugins-dependencies
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+
+# Logs
+*.log
+logs/
+
+# Flutter/Dart
+fuisor_app/.pub/
+fuisor_app/.packages
+fuisor_app/pubspec.lock
+
+# Android
+fuisor_app/android/.gradle/
+fuisor_app/android/local.properties
+*.apk
+*.ap_
+*.aab
+
+# iOS
+fuisor_app/ios/Pods/
+fuisor_app/ios/.symlinks/
+fuisor_app/ios/Flutter/Flutter.framework
+fuisor_app/ios/Flutter/Flutter.podspec
+
+# Test files
+test_*.js
+
