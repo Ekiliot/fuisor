@@ -152,6 +152,77 @@ class ApiService {
     }
   }
 
+  Future<void> deletePost(String postId) async {
+    print('ApiService: Deleting post $postId');
+    print('ApiService: Access token: ${_accessToken != null ? "Present (${_accessToken!.substring(0, 20)}...)" : "Missing"}');
+    
+    final response = await http.delete(
+      Uri.parse('$baseUrl/posts/$postId'),
+      headers: _headers,
+    );
+
+    print('ApiService: Delete post response status: ${response.statusCode}');
+    
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      print('ApiService: Post deleted successfully: ${data['message']}');
+    } else {
+      final error = jsonDecode(response.body);
+      throw Exception(error['error'] ?? error['message'] ?? 'Failed to delete post');
+    }
+  }
+
+  Future<bool> savePost(String postId) async {
+    print('ApiService: Saving post $postId');
+    final response = await http.post(
+      Uri.parse('$baseUrl/posts/$postId/save'),
+      headers: _headers,
+    );
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return data['saved'] ?? true;
+    } else {
+      final error = jsonDecode(response.body);
+      throw Exception(error['error'] ?? error['message'] ?? 'Failed to save post');
+    }
+  }
+
+  Future<bool> unsavePost(String postId) async {
+    print('ApiService: Unsaving post $postId');
+    final response = await http.delete(
+      Uri.parse('$baseUrl/posts/$postId/save'),
+      headers: _headers,
+    );
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return data['saved'] ?? false;
+    } else {
+      final error = jsonDecode(response.body);
+      throw Exception(error['error'] ?? error['message'] ?? 'Failed to unsave post');
+    }
+  }
+
+  Future<Map<String, dynamic>> getSavedPosts({int page = 1, int limit = 20}) async {
+    try {
+      final url = '$baseUrl/users/me/saved?page=$page&limit=$limit';
+      final response = await http.get(
+        Uri.parse(url),
+        headers: _headers,
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        final error = jsonDecode(response.body);
+        throw Exception(error['error'] ?? 'Failed to load saved posts');
+      }
+    } catch (e) {
+      throw Exception('Failed to load saved posts: $e');
+    }
+  }
+
   // Comment likes endpoints
   Future<Map<String, dynamic>> likeComment(String postId, String commentId) async {
     final response = await http.post(
@@ -218,6 +289,23 @@ class ApiService {
     } else {
       final error = jsonDecode(response.body);
       throw Exception(error['error'] ?? 'Failed to add comment');
+    }
+  }
+
+  Future<Comment> updateComment(String postId, String commentId, String content) async {
+    final response = await http.put(
+      Uri.parse('$baseUrl/posts/$postId/comments/$commentId'),
+      headers: _headers,
+      body: jsonEncode({
+        'content': content,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      return Comment.fromJson(jsonDecode(response.body));
+    } else {
+      final error = jsonDecode(response.body);
+      throw Exception(error['error'] ?? error['message'] ?? 'Failed to update comment');
     }
   }
 

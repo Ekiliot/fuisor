@@ -8,8 +8,10 @@ import '../screens/comments_screen.dart';
 import '../screens/hashtag_screen.dart';
 import '../providers/auth_provider.dart';
 import '../providers/posts_provider.dart';
+import '../services/api_service.dart';
 import 'hashtag_text.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class PostCard extends StatefulWidget {
   final Post post;
@@ -29,6 +31,7 @@ class PostCard extends StatefulWidget {
 
 class _PostCardState extends State<PostCard> {
   bool _isLiked = false;
+  bool _isSaved = false;
   bool _showComments = false;
   final TextEditingController _commentController = TextEditingController();
 
@@ -36,6 +39,7 @@ class _PostCardState extends State<PostCard> {
   void initState() {
     super.initState();
     _isLiked = widget.post.isLiked;
+    _isSaved = widget.post.isSaved;
   }
 
   @override
@@ -57,6 +61,73 @@ class _PostCardState extends State<PostCard> {
       print('PostCard: Navigation completed');
     } catch (e) {
       print('PostCard: Navigation error: $e');
+    }
+  }
+
+  Future<void> _toggleSave() async {
+    final newSavedState = !_isSaved;
+    
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final accessToken = prefs.getString('access_token');
+      
+      if (accessToken == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Please login to save posts'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      final apiService = ApiService();
+      apiService.setAccessToken(accessToken);
+      
+      // Optimistically update UI
+      setState(() {
+        _isSaved = newSavedState;
+      });
+
+      // Call API
+      final saved = newSavedState
+          ? await apiService.savePost(widget.post.id)
+          : await apiService.unsavePost(widget.post.id);
+
+      // Update state with actual result
+      setState(() {
+        _isSaved = saved;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(saved 
+                ? 'Post saved' 
+                : 'Post unsaved'),
+            backgroundColor: const Color(0xFF0095F6),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error toggling save: $e');
+      // Revert optimistic update
+      setState(() {
+        _isSaved = !newSavedState;
+      });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to ${newSavedState ? "save" : "unsave"} post: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
     }
   }
 
@@ -146,6 +217,70 @@ class _PostCardState extends State<PostCard> {
                           await postsProvider.loadFeed(refresh: true, accessToken: accessToken);
                         }
                       }
+                    } else if (value == 'delete') {
+                      // Show confirmation dialog
+                      final shouldDelete = await showDialog<bool>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          backgroundColor: const Color(0xFF1A1A1A),
+                          title: const Text(
+                            'Delete Post',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                          content: const Text(
+                            'Are you sure you want to delete this post? This action cannot be undone.',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(context).pop(false),
+                              child: const Text(
+                                'Cancel',
+                                style: TextStyle(color: Colors.white70),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.of(context).pop(true),
+                              child: const Text(
+                                'Delete',
+                                style: TextStyle(color: Colors.red),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+
+                      if (shouldDelete == true && mounted) {
+                        try {
+                          final postsProvider = context.read<PostsProvider>();
+                          final authProvider = context.read<AuthProvider>();
+                          final accessToken = await authProvider.getAccessToken();
+                          
+                          if (accessToken != null) {
+                            await postsProvider.deletePost(widget.post.id, accessToken: accessToken);
+                            
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Post deleted successfully'),
+                                  backgroundColor: Color(0xFF0095F6),
+                                  duration: Duration(seconds: 2),
+                                ),
+                              );
+                            }
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Failed to delete post: $e'),
+                                backgroundColor: Colors.red,
+                                duration: const Duration(seconds: 3),
+                              ),
+                            );
+                          }
+                        }
+                      }
                     }
                   },
                   itemBuilder: (context) {
@@ -164,16 +299,28 @@ class _PostCardState extends State<PostCard> {
                             ],
                           ),
                         ),
-                      const PopupMenuItem<String>(
-                        value: 'report',
-                        child: Row(
-                          children: [
-                            Icon(EvaIcons.flagOutline, color: Colors.white),
-                            SizedBox(width: 8),
-                            Text('Report', style: TextStyle(color: Colors.white)),
-                          ],
+                      if (isOwnPost)
+                        const PopupMenuItem<String>(
+                          value: 'delete',
+                          child: Row(
+                            children: [
+                              Icon(EvaIcons.trashOutline, color: Colors.red),
+                              SizedBox(width: 8),
+                              Text('Delete Post', style: TextStyle(color: Colors.red)),
+                            ],
+                          ),
                         ),
-                      ),
+                      if (!isOwnPost)
+                        const PopupMenuItem<String>(
+                          value: 'report',
+                          child: Row(
+                            children: [
+                              Icon(EvaIcons.flagOutline, color: Colors.white),
+                              SizedBox(width: 8),
+                              Text('Report', style: TextStyle(color: Colors.white)),
+                            ],
+                          ),
+                        ),
                     ];
                   },
                 ),
@@ -259,10 +406,17 @@ class _PostCardState extends State<PostCard> {
                       color: Colors.white,
                     ),
                     const Spacer(),
-                    const Icon(
-                      EvaIcons.bookmarkOutline,
-                      size: 28,
-                      color: Colors.white,
+                    GestureDetector(
+                      onTap: () => _toggleSave(),
+                      child: Icon(
+                        _isSaved 
+                            ? EvaIcons.bookmark 
+                            : EvaIcons.bookmarkOutline,
+                        size: 28,
+                        color: _isSaved 
+                            ? const Color(0xFF0095F6)
+                            : Colors.white,
+                      ),
                     ),
                   ],
                 ),

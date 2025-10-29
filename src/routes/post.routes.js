@@ -615,6 +615,55 @@ router.post('/:id/comments', validateAuth, validateUUID, validateComment, async 
   }
 });
 
+// Update comment
+router.put('/:id/comments/:commentId', validateAuth, validateUUID, validateCommentId, validateComment, async (req, res) => {
+  try {
+    const { id, commentId } = req.params;
+    const { content } = req.body;
+    const userId = req.user.id;
+
+    if (!content || content.trim().length === 0) {
+      return res.status(400).json({ message: 'Comment content is required' });
+    }
+
+    // Check if comment exists and belongs to user
+    const { data: comment, error: fetchError } = await supabaseAdmin
+      .from('comments')
+      .select('user_id, post_id')
+      .eq('id', commentId)
+      .eq('post_id', id)
+      .single();
+
+    if (fetchError || !comment) {
+      return res.status(404).json({ message: 'Comment not found' });
+    }
+
+    if (comment.user_id !== userId) {
+      return res.status(403).json({ message: 'Unauthorized to edit this comment' });
+    }
+
+    // Update comment
+    const { data: updatedComment, error } = await supabaseAdmin
+      .from('comments')
+      .update({
+        content: content.trim(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', commentId)
+      .select(`
+        *,
+        profiles:user_id (username, avatar_url)
+      `)
+      .single();
+
+    if (error) throw error;
+
+    res.json(updatedComment);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Delete comment
 router.delete('/:id/comments/:commentId', validateAuth, validateUUID, validateCommentId, async (req, res) => {
   try {
@@ -991,6 +1040,74 @@ router.get('/mentions', validateAuth, async (req, res) => {
       page: parseInt(page),
       totalPages: Math.ceil(count / limit)
     });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Save/Unsave post
+router.post('/:id/save', validateAuth, validateUUID, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    // Check if post exists
+    const { data: post, error: postError } = await supabaseAdmin
+      .from('posts')
+      .select('id')
+      .eq('id', id)
+      .single();
+
+    if (postError || !post) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+
+    // Check if already saved
+    const { data: existingSave, error: checkError } = await supabaseAdmin
+      .from('saved_posts')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('post_id', id)
+      .single();
+
+    if (existingSave) {
+      return res.json({ message: 'Post already saved', saved: true });
+    }
+
+    // Save post
+    const { data, error } = await supabaseAdmin
+      .from('saved_posts')
+      .insert([{
+        user_id: userId,
+        post_id: id
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json({ message: 'Post saved successfully', saved: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Unsave post
+router.delete('/:id/save', validateAuth, validateUUID, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    // Remove saved post
+    const { error } = await supabaseAdmin
+      .from('saved_posts')
+      .delete()
+      .eq('user_id', userId)
+      .eq('post_id', id);
+
+    if (error) throw error;
+
+    res.json({ message: 'Post unsaved successfully', saved: false });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

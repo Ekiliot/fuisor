@@ -71,6 +71,7 @@ class Post {
   final User? user; // Author info
   final List<Comment>? comments;
   final bool isLiked;
+  final bool isSaved;
 
   Post({
     required this.id,
@@ -87,6 +88,7 @@ class Post {
     this.user,
     this.comments,
     this.isLiked = false,
+    this.isSaved = false,
   });
 
   factory Post.fromJson(Map<String, dynamic> json) {
@@ -111,6 +113,7 @@ class Post {
           ? (json['comments'] as List).map((c) => Comment.fromJson(c)).toList()
           : null,
       isLiked: json['is_liked'] ?? false,
+      isSaved: json['is_saved'] ?? false,
     );
   }
 
@@ -130,6 +133,7 @@ class Post {
       'profiles': user?.toJson(),
       'comments': comments?.map((c) => c.toJson()).toList(),
       'is_liked': isLiked,
+      'is_saved': isSaved,
     };
   }
 
@@ -148,6 +152,7 @@ class Post {
     User? user,
     List<Comment>? comments,
     bool? isLiked,
+    bool? isSaved,
   }) {
     return Post(
       id: id ?? this.id,
@@ -164,6 +169,7 @@ class Post {
       user: user ?? this.user,
       comments: comments ?? this.comments,
       isLiked: isLiked ?? this.isLiked,
+      isSaved: isSaved ?? this.isSaved,
     );
   }
 }

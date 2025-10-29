@@ -460,6 +460,39 @@ class PostsProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> deletePost(String postId, {String? accessToken}) async {
+    try {
+      print('PostsProvider: Deleting post $postId');
+      
+      // Устанавливаем токен перед запросом
+      if (accessToken != null) {
+        _apiService.setAccessToken(accessToken);
+      }
+
+      _setLoading(true);
+      _setError(null);
+
+      await _apiService.deletePost(postId);
+
+      // Удаляем пост из всех списков
+      _posts.removeWhere((post) => post.id == postId);
+      _feedPosts.removeWhere((post) => post.id == postId);
+      _hashtagPosts.removeWhere((post) => post.id == postId);
+      _mentionedPosts.removeWhere((post) => post.id == postId);
+      _userPosts.removeWhere((post) => post.id == postId);
+
+      _setLoading(false);
+      notifyListeners();
+      
+      print('PostsProvider: Post deleted successfully');
+    } catch (e) {
+      print('PostsProvider: Error deleting post: $e');
+      _setError(e.toString());
+      _setLoading(false);
+      rethrow;
+    }
+  }
+
   void clearError() {
     _setError(null);
   }

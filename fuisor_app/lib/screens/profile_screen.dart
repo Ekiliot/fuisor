@@ -13,6 +13,7 @@ import '../widgets/profile_menu_sheet.dart';
 import '../models/user.dart';
 import 'edit_profile_screen.dart';
 import 'followers_list_screen.dart';
+import 'saved_posts_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String? userId;
@@ -23,16 +24,18 @@ class ProfileScreen extends StatefulWidget {
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> {
+class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderStateMixin {
   final RefreshController _refreshController = RefreshController(initialRefresh: false);
   User? _viewingUser;
   bool _isLoadingUser = false;
   bool _isFollowing = false;
   bool _isCheckingFollowStatus = false;
+  late TabController _tabController;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     // Загружаем посты пользователя при инициализации
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       // Ждем инициализации AuthProvider
@@ -575,35 +578,89 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                 const SizedBox(height: 20),
 
-                // Posts Grid
-                Consumer<PostsProvider>(
-                  builder: (context, postsProvider, child) {
-                    return PostGridWidget(
-                      posts: postsProvider.userPosts,
-                      isLoading: postsProvider.isLoading,
-                      hasMorePosts: postsProvider.hasMoreUserPosts,
-                      onLoadMore: () async {
-                        // Ждем инициализации AuthProvider перед загрузкой
-                        await _waitForAuthProvider();
-                        
-                        if (authProvider.currentUser != null && authProvider.currentUser!.id.isNotEmpty) {
-                          final prefs = await SharedPreferences.getInstance();
-                          final accessToken = prefs.getString('access_token');
+                // Tabs (only for own profile)
+                if (widget.userId == null || widget.userId == authProvider.currentUser?.id)
+                  Column(
+                    children: [
+                      TabBar(
+                        controller: _tabController,
+                        indicatorColor: Colors.white,
+                        labelColor: Colors.white,
+                        unselectedLabelColor: Colors.grey,
+                        tabs: const [
+                          Tab(
+                            icon: Icon(EvaIcons.gridOutline),
+                          ),
+                          Tab(
+                            icon: Icon(EvaIcons.bookmarkOutline),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+                  ),
+
+                // Tab View
+                if (widget.userId == null || widget.userId == authProvider.currentUser?.id)
+                  SizedBox(
+                    height: MediaQuery.of(context).size.height,
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        // Posts Tab
+                        Consumer<PostsProvider>(
+                          builder: (context, postsProvider, child) {
+                            return PostGridWidget(
+                              posts: postsProvider.userPosts,
+                              isLoading: postsProvider.isLoading,
+                              hasMorePosts: postsProvider.hasMoreUserPosts,
+                              onLoadMore: () async {
+                                await _waitForAuthProvider();
+                                
+                                if (authProvider.currentUser != null && authProvider.currentUser!.id.isNotEmpty) {
+                                  final prefs = await SharedPreferences.getInstance();
+                                  final accessToken = prefs.getString('access_token');
+                                  
+                                  await postsProvider.loadUserPosts(
+                                    userId: authProvider.currentUser!.id,
+                                    refresh: false,
+                                    accessToken: accessToken,
+                                  );
+                                }
+                              },
+                            );
+                          },
+                        ),
+                        // Saved Posts Tab
+                        const SavedPostsScreen(),
+                      ],
+                    ),
+                  )
+                else
+                  // Posts Grid for other users
+                  Consumer<PostsProvider>(
+                    builder: (context, postsProvider, child) {
+                      return PostGridWidget(
+                        posts: postsProvider.userPosts,
+                        isLoading: postsProvider.isLoading,
+                        hasMorePosts: postsProvider.hasMoreUserPosts,
+                        onLoadMore: () async {
+                          await _waitForAuthProvider();
                           
-                          print('ProfileScreen: Loading more posts for user: ${authProvider.currentUser!.id}');
-                          
-                          await postsProvider.loadUserPosts(
-                            userId: authProvider.currentUser!.id,
-                            refresh: false,
-                            accessToken: accessToken,
-                          );
-                        } else {
-                          print('ProfileScreen: Cannot load more posts - no valid user ID');
-                        }
-                      },
-                    );
-                  },
-                ),
+                          if (widget.userId != null) {
+                            final prefs = await SharedPreferences.getInstance();
+                            final accessToken = prefs.getString('access_token');
+                            
+                            await postsProvider.loadUserPosts(
+                              userId: widget.userId!,
+                              refresh: false,
+                              accessToken: accessToken,
+                            );
+                          }
+                        },
+                      );
+                    },
+                  ),
               ],
             ),
             ),

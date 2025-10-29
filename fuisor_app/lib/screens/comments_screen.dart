@@ -37,6 +37,8 @@ class _CommentsScreenState extends State<CommentsScreen> {
   int _currentPage = 1;
   String? _replyingToCommentId;
   String? _replyingToUsername;
+  String? _editingCommentId;
+  Comment? _editingComment;
   bool _isHeaderCollapsed = false;
 
   @override
@@ -134,33 +136,100 @@ class _CommentsScreenState extends State<CommentsScreen> {
     if (content.isEmpty) return;
 
     try {
-      final postsProvider = context.read<PostsProvider>();
-      await postsProvider.addComment(
-        widget.postId,
-        content,
-        parentCommentId: _replyingToCommentId,
-      );
+      // Check if editing or adding new comment
+      if (_editingCommentId != null && _editingComment != null) {
+        // Editing existing comment
+        final prefs = await SharedPreferences.getInstance();
+        final accessToken = prefs.getString('access_token');
+        if (accessToken != null) {
+          _apiService.setAccessToken(accessToken);
+          final updatedComment = await _apiService.updateComment(
+            widget.postId,
+            _editingCommentId!,
+            content,
+          );
 
-      _commentController.clear();
-      setState(() {
-        _replyingToCommentId = null;
-        _replyingToUsername = null;
-      });
+          // Update comment in local state
+          setState(() {
+            final index = _comments.indexWhere((c) => c.id == _editingCommentId);
+            if (index != -1) {
+              _comments[index] = updatedComment.copyWith(
+                replies: _editingComment!.replies,
+                isLiked: _editingComment!.isLiked,
+                isDisliked: _editingComment!.isDisliked,
+                likesCount: _editingComment!.likesCount,
+                dislikesCount: _editingComment!.dislikesCount,
+              );
+            } else {
+              // Check in replies
+              for (var c in _comments) {
+                if (c.replies != null) {
+                  final replyIndex = c.replies!.indexWhere((r) => r.id == _editingCommentId);
+                  if (replyIndex != -1) {
+                    c.replies![replyIndex] = updatedComment.copyWith(
+                      isLiked: _editingComment!.isLiked,
+                      isDisliked: _editingComment!.isDisliked,
+                      likesCount: _editingComment!.likesCount,
+                      dislikesCount: _editingComment!.dislikesCount,
+                    );
+                  }
+                }
+              }
+            }
+            _editingCommentId = null;
+            _editingComment = null;
+          });
 
-      // Reload comments to show the new one
-      _loadComments(refresh: true);
+          _commentController.clear();
+          
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Comment updated successfully'),
+                backgroundColor: Color(0xFF0095F6),
+                duration: Duration(seconds: 2),
+              ),
+            );
+          }
+        }
+      } else {
+        // Adding new comment
+        final postsProvider = context.read<PostsProvider>();
+        await postsProvider.addComment(
+          widget.postId,
+          content,
+          parentCommentId: _replyingToCommentId,
+        );
+
+        _commentController.clear();
+        setState(() {
+          _replyingToCommentId = null;
+          _replyingToUsername = null;
+        });
+
+        // Reload comments to show the new one
+        _loadComments(refresh: true);
+      }
     } catch (e) {
-      print('Error adding comment: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to add comment: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      print('Error adding/editing comment: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_editingCommentId != null 
+                ? 'Failed to update comment: $e'
+                : 'Failed to add comment: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
     }
   }
 
   void _replyToComment(String commentId, String username) {
+    // Cancel any active edit
+    _cancelEdit();
+    
     setState(() {
       _replyingToCommentId = commentId;
       _replyingToUsername = username;
@@ -179,7 +248,14 @@ class _CommentsScreenState extends State<CommentsScreen> {
       _replyingToCommentId = null;
       _replyingToUsername = null;
     });
-    _commentController.clear();
+  }
+
+  void _cancelEdit() {
+    setState(() {
+      _editingCommentId = null;
+      _editingComment = null;
+      _commentController.clear();
+    });
   }
 
   @override
@@ -286,8 +362,8 @@ class _CommentsScreenState extends State<CommentsScreen> {
                       ),
           ),
 
-          // Reply indicator
-          if (_replyingToCommentId != null)
+          // Reply/Edit indicator
+          if (_replyingToCommentId != null || _editingCommentId != null)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: const BoxDecoration(
@@ -300,7 +376,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
                 children: [
                   Expanded(
                     child: Text(
-                      'Replying to @$_replyingToUsername',
+                      _editingCommentId != null
+                          ? 'Edit comment'
+                          : 'Replying to @$_replyingToUsername',
                       style: const TextStyle(
                         color: Color(0xFF0095F6),
                         fontSize: 14,
@@ -309,7 +387,10 @@ class _CommentsScreenState extends State<CommentsScreen> {
                   ),
                   IconButton(
                     icon: const Icon(EvaIcons.close, color: Colors.white, size: 20),
-                    onPressed: _cancelReply,
+                    onPressed: () {
+                      _cancelReply();
+                      _cancelEdit();
+                    },
                   ),
                 ],
               ),
@@ -354,14 +435,16 @@ class _CommentsScreenState extends State<CommentsScreen> {
                             child: TextField(
                               controller: _commentController,
                               focusNode: _commentFocusNode,
-                              decoration: const InputDecoration(
-                                hintText: 'Add a comment...',
+                              decoration: InputDecoration(
+                                hintText: _editingCommentId != null 
+                                    ? 'Edit your comment...' 
+                                    : 'Add a comment...',
                                 border: InputBorder.none,
-                                contentPadding: EdgeInsets.symmetric(
+                                contentPadding: const EdgeInsets.symmetric(
                                   horizontal: 18,
                                   vertical: 14,
                                 ),
-                                hintStyle: TextStyle(
+                                hintStyle: const TextStyle(
                                   color: Color(0xFF8E8E8E),
                                   fontSize: 14,
                                 ),
@@ -550,16 +633,62 @@ class _CommentsScreenState extends State<CommentsScreen> {
                   ],
                 ),
               ),
-              // Delete button for own comments
-              if (isOwnComment)
-                IconButton(
-                  icon: const Icon(
-                    EvaIcons.trashOutline,
-                    color: Colors.red,
-                    size: 20,
-                  ),
-                  onPressed: () => _deleteComment(comment.id),
+              // Menu button (three dots)
+              PopupMenuButton<String>(
+                icon: const Icon(
+                  EvaIcons.moreHorizontal,
+                  size: 18,
+                  color: Color(0xFF8E8E8E),
                 ),
+                onSelected: (value) async {
+                  if (value == 'edit') {
+                    _editComment(comment);
+                  } else if (value == 'delete') {
+                    _deleteComment(comment.id);
+                  } else if (value == 'report') {
+                    _reportComment(comment);
+                  }
+                },
+                itemBuilder: (context) {
+                  if (isOwnComment) {
+                    return [
+                      const PopupMenuItem<String>(
+                        value: 'edit',
+                        child: Row(
+                          children: [
+                            Icon(EvaIcons.editOutline, color: Colors.white, size: 18),
+                            SizedBox(width: 8),
+                            Text('Edit', style: TextStyle(color: Colors.white)),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem<String>(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(EvaIcons.trashOutline, color: Colors.red, size: 18),
+                            SizedBox(width: 8),
+                            Text('Delete', style: TextStyle(color: Colors.red)),
+                          ],
+                        ),
+                      ),
+                    ];
+                  } else {
+                    return [
+                      const PopupMenuItem<String>(
+                        value: 'report',
+                        child: Row(
+                          children: [
+                            Icon(EvaIcons.flagOutline, color: Colors.white, size: 18),
+                            SizedBox(width: 8),
+                            Text('Report', style: TextStyle(color: Colors.white)),
+                          ],
+                        ),
+                      ),
+                    ];
+                  }
+                },
+              ),
             ],
           ),
           // Replies
@@ -652,16 +781,62 @@ class _CommentsScreenState extends State<CommentsScreen> {
               ],
             ),
           ),
-          // Delete button for own replies
-          if (isOwnReply)
-            IconButton(
-              icon: const Icon(
-                EvaIcons.trashOutline,
-                color: Colors.red,
-                size: 18,
-              ),
-              onPressed: () => _deleteComment(reply.id),
+          // Menu button (three dots) for replies
+          PopupMenuButton<String>(
+            icon: const Icon(
+              EvaIcons.moreHorizontal,
+              size: 16,
+              color: Color(0xFF8E8E8E),
             ),
+            onSelected: (value) async {
+              if (value == 'edit') {
+                _editComment(reply);
+              } else if (value == 'delete') {
+                _deleteComment(reply.id);
+              } else if (value == 'report') {
+                _reportComment(reply);
+              }
+            },
+            itemBuilder: (context) {
+              if (isOwnReply) {
+                return [
+                  const PopupMenuItem<String>(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        Icon(EvaIcons.editOutline, color: Colors.white, size: 16),
+                        SizedBox(width: 8),
+                        Text('Edit', style: TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem<String>(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(EvaIcons.trashOutline, color: Colors.red, size: 16),
+                        SizedBox(width: 8),
+                        Text('Delete', style: TextStyle(color: Colors.red, fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                ];
+              } else {
+                return [
+                  const PopupMenuItem<String>(
+                    value: 'report',
+                    child: Row(
+                      children: [
+                        Icon(EvaIcons.flagOutline, color: Colors.white, size: 16),
+                        SizedBox(width: 8),
+                        Text('Report', style: TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                ];
+              }
+            },
+          ),
         ],
       ),
     );
@@ -961,7 +1136,6 @@ class _CommentsScreenState extends State<CommentsScreen> {
 
   Future<void> _deleteComment(String commentId) async {
     try {
-      
       // Show confirmation dialog
       final confirm = await showDialog<bool>(
         context: context,
@@ -999,19 +1173,130 @@ class _CommentsScreenState extends State<CommentsScreen> {
         final prefs = await SharedPreferences.getInstance();
         final accessToken = prefs.getString('access_token');
         if (accessToken != null) {
-          // TODO: Implement deleteComment in PostsProvider
-          // For now, just reload comments
-          _loadComments(refresh: true);
+          _apiService.setAccessToken(accessToken);
+          await _apiService.deleteComment(widget.postId, commentId);
+          
+          // Remove comment from local state
+          setState(() {
+            _comments.removeWhere((c) => c.id == commentId);
+            // Also remove from replies
+            for (var comment in _comments) {
+              comment.replies?.removeWhere((r) => r.id == commentId);
+            }
+          });
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Comment deleted successfully'),
+                backgroundColor: Color(0xFF0095F6),
+                duration: Duration(seconds: 2),
+              ),
+            );
+          }
         }
       }
     } catch (e) {
       print('Error deleting comment: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to delete comment: $e'),
-          backgroundColor: Colors.red,
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to delete comment: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  void _editComment(Comment comment) {
+    // Cancel any active reply
+    _cancelReply();
+    
+    // Set edit mode
+    setState(() {
+      _editingCommentId = comment.id;
+      _editingComment = comment;
+      _commentController.text = comment.content;
+    });
+    
+    // Request focus after a short delay to ensure the widget is built
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (mounted) {
+        _commentFocusNode.requestFocus();
+      }
+    });
+  }
+
+  Future<void> _reportComment(Comment comment) async {
+    try {
+      final reasons = [
+        'Spam',
+        'Harassment or bullying',
+        'False information',
+        'Hate speech',
+        'Violence',
+        'Other'
+      ];
+
+      final selectedReason = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: const Color(0xFF121212),
+          title: const Text(
+            'Report Comment',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: reasons.map((reason) {
+                return ListTile(
+                  title: Text(
+                    reason,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  onTap: () => Navigator.of(context).pop(reason),
+                );
+              }).toList(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: Color(0xFF8E8E8E)),
+              ),
+            ),
+          ],
         ),
       );
+
+      if (selectedReason != null) {
+        // TODO: Implement report API endpoint
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Comment reported: $selectedReason'),
+              backgroundColor: const Color(0xFF0095F6),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('Error reporting comment: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to report comment: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
     }
   }
 
